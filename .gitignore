@@ -1,0 +1,10 @@
+/bin/
+/dist/
+coverage.out
+*.test
+*.prof
+.env
+.idea/
+.vscode/
+video/node_modules/
+video/frames/
