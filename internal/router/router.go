@@ -1,7 +1,9 @@
 // Package router picks the worker for a request. It is model-aware (only
 // healthy workers advertising the model whose breaker admits traffic are
 // candidates), prefers workers already holding the model in GPU memory, and
-// balances load with power-of-two-choices.
+// balances load with power-of-two-choices. With prefix affinity enabled it
+// first tries to land the request on the worker most likely to hold its
+// prompt prefix in KV cache.
 package router
 
 import (
@@ -21,8 +23,11 @@ type Reason string
 
 // Routing reasons.
 const (
-	ReasonSingle Reason = "single" // only one candidate
-	ReasonP2C    Reason = "p2c"    // least-loaded of two random candidates
+	ReasonSingle         Reason = "single"          // only one candidate
+	ReasonP2C            Reason = "p2c"             // least-loaded of two random candidates
+	ReasonAffinitySticky Reason = "affinity_sticky" // conversation pinned to its previous worker
+	ReasonAffinityHash   Reason = "affinity_hash"   // rendezvous-hash owner of the prompt prefix
+	ReasonAffinitySpill  Reason = "affinity_spill"  // owner overloaded; next worker in hash order
 )
 
 // coldPenalty is the load-equivalent cost of routing to a worker that must
@@ -30,11 +35,22 @@ const (
 const coldPenalty = 8.0
 
 // Config configures a Router.
-type Config struct{}
+type Config struct {
+	PrefixAffinity    bool
+	PrefixChars       int
+	LoadFactor        float64
+	AffinityTableSize int
+}
 
 // Request is the routing input.
 type Request struct {
 	Model string
+	// ConvKey identifies the conversation (system prompt + first user turn,
+	// or an explicit session ID). Zero disables sticky lookup.
+	ConvKey uint64
+	// GroupKey identifies the shared prompt prefix (usually the system
+	// prompt). Zero disables hash placement.
+	GroupKey uint64
 	// Exclude lists worker IDs that already failed this request.
 	Exclude map[string]bool
 }
@@ -48,8 +64,9 @@ type Decision struct {
 
 // Router selects workers from a registry.
 type Router struct {
-	reg *registry.Registry
-	cfg Config
+	reg   *registry.Registry
+	cfg   Config
+	table *lruTable
 
 	mu  sync.Mutex
 	rng *rand.Rand
@@ -57,7 +74,18 @@ type Router struct {
 
 // New returns a Router.
 func New(reg *registry.Registry, cfg Config) *Router {
-	return &Router{reg: reg, cfg: cfg, rng: rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64()))}
+	if cfg.LoadFactor < 1 {
+		cfg.LoadFactor = 1.25
+	}
+	if cfg.AffinityTableSize <= 0 {
+		cfg.AffinityTableSize = 100_000
+	}
+	return &Router{
+		reg:   reg,
+		cfg:   cfg,
+		table: newLRUTable(cfg.AffinityTableSize),
+		rng:   rand.New(rand.NewPCG(rand.Uint64(), rand.Uint64())),
+	}
 }
 
 // Config returns the router configuration.
@@ -70,11 +98,22 @@ func (r *Router) Select(req Request) (Decision, error) {
 	case 0:
 		return Decision{}, ErrNoWorkers
 	case 1:
+		r.remember(req, cands[0])
 		return Decision{Worker: cands[0], Reason: ReasonSingle, Candidates: 1}, nil
 	}
+	if r.cfg.PrefixAffinity && (req.ConvKey != 0 || req.GroupKey != 0) {
+		if d, ok := r.selectAffinity(req, cands); ok {
+			return d, nil
+		}
+	}
 	w := r.p2c(req.Model, cands)
+	r.remember(req, w)
 	return Decision{Worker: w, Reason: ReasonP2C, Candidates: len(cands)}, nil
 }
+
+// Forget drops affinity entries; used when a worker is removed so the table
+// does not keep steering traffic at a ghost.
+func (r *Router) Forget(workerID string) { r.table.dropValue(workerID) }
 
 func (r *Router) candidates(req Request) []*registry.Worker {
 	all := r.reg.Candidates(req.Model)
@@ -115,4 +154,10 @@ func (r *Router) p2c(model string, cands []*registry.Worker) *registry.Worker {
 		return b
 	}
 	return a
+}
+
+func (r *Router) remember(req Request, w *registry.Worker) {
+	if r.cfg.PrefixAffinity && req.ConvKey != 0 {
+		r.table.put(req.ConvKey, w.ID)
+	}
 }
