@@ -1,0 +1,117 @@
+# Local development config: three simulated workers on localhost.
+#   make run-workers   # starts mock vLLM x2 + mock Ollama
+#   make run           # starts the gateway with this file
+server:
+  addr: ":8080"
+  read_header_timeout: 10s
+  shutdown_timeout: 30s
+  max_body_bytes: 4194304
+
+auth:
+  enabled: true
+  keys:
+    - name: local-dev
+      key: ${GATEWAY_API_KEY:-sk-local-dev}
+      requests_per_min: 1200
+      tokens_per_min: 2000000
+
+rate_limit:
+  enabled: true
+  backend: memory          # use redis when running more than one gateway replica
+  window: 1m
+  buckets: 60
+  default_requests_per_min: 600
+  default_tokens_per_min: 200000
+
+cache:
+  enabled: true
+  backend: memory
+  ttl: 10m
+  semantic: true
+  similarity_threshold: 0.95
+  embedding_dims: 256
+  lsh_bits: 12
+  max_bucket_entries: 64
+  max_temperature: 0.0     # only deterministic requests are cached by default
+  # embedding_url: http://embedder:8000   # OpenAI-compatible /v1/embeddings
+  # embedding_model: BAAI/bge-small-en-v1.5
+
+batcher:
+  enabled: true
+  min_wait: 5ms
+  max_wait: 20ms
+  max_batch_size: 16
+  coalesce: true
+
+router:
+  prefix_affinity: true
+  prefix_chars: 4096
+  load_factor: 1.25
+  affinity_table_size: 100000
+
+resilience:
+  request_timeout: 120s
+  first_token_timeout: 15s
+  max_attempts: 3
+  backoff_base: 50ms
+  backoff_max: 1s
+  breaker:
+    failure_threshold: 5
+    latency_threshold: 10s
+    slow_threshold: 3
+    open_duration: 15s
+    half_open_probes: 1
+
+registry:
+  probe_interval: 2s
+  probe_timeout: 1s
+  unhealthy_after: 2
+  stale_after: 30s
+
+observability:
+  log_level: info
+  log_format: json
+  metrics_enabled: true
+  tracing_enabled: false
+  otlp_endpoint: localhost:4318
+  otlp_insecure: true
+  service_name: inference-gateway
+  sample_ratio: 1.0
+
+admin:
+  enabled: true
+  token: ${GATEWAY_ADMIN_TOKEN:-admin-local-dev}
+
+models:
+  - name: llama3-8b
+    aliases: [gpt-4o-mini, llama3]
+    default_max_tokens: 512
+    context_window: 8192
+  - name: mistral-7b
+    aliases: [mistral, fast]
+    default_max_tokens: 512
+  - name: phi3
+    aliases: [cheap]
+    default_max_tokens: 256
+  - name: gemma2
+    default_max_tokens: 256
+
+workers:
+  - id: vllm-1
+    url: http://localhost:8001
+    kind: vllm
+    models: [llama3-8b, mistral-7b]
+  - id: vllm-2
+    url: http://localhost:8002
+    kind: vllm
+    models: [llama3-8b]
+  - id: ollama-1
+    url: http://localhost:8003
+    kind: ollama
+    models: [phi3, gemma2]
+
+# Self-registering workers pull these at startup (GET /internal/v1/worker-config/<id>).
+assignments:
+  vllm-3:
+    kind: vllm
+    models: [llama3-8b, mistral-7b]
