@@ -5,7 +5,7 @@ LDFLAGS   := -s -w -X main.version=$(VERSION)
 API_KEY   ?= sk-local-dev
 ADMIN     ?= admin-local-dev
 
-.PHONY: all build test race cover lint fmt run run-workers stop loadgen bench-affinity clean
+.PHONY: all build test race cover lint fmt run run-workers stop loadgen bench-affinity docker compose-up compose-down clean
 
 all: lint test build
 
@@ -46,6 +46,15 @@ loadgen: build ## Replay multi-turn conversations against localhost:8080
 
 bench-affinity: build ## Compare prefix-affinity routing against plain least-loaded
 	@./scripts/bench-affinity.sh
+
+docker: ## Build the container image
+	docker build --build-arg VERSION=$(VERSION) -t inference-gateway:$(VERSION) .
+
+compose-up: ## Full stack: nginx, 2 gateways, workers, Redis, Prometheus, Grafana, Jaeger
+	docker compose -f deploy/docker-compose.yml up --build -d
+
+compose-down:
+	docker compose -f deploy/docker-compose.yml down
 
 clean:
 	rm -rf $(BIN) coverage.out

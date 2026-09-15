@@ -1,0 +1,120 @@
+# Full local stack: nginx → 2 stateless gateways → simulated GPU workers,
+# with Redis, Prometheus, Grafana and Jaeger.
+#
+#   docker compose -f deploy/docker-compose.yml up --build
+#
+#   API      http://localhost:8080  (key: sk-local-dev)
+#   Grafana  http://localhost:3000  (dashboard "Inference Gateway")
+#   Jaeger   http://localhost:16686
+#
+# The "gpu" profile swaps in real vLLM and Ollama containers:
+#   docker compose -f deploy/docker-compose.yml --profile gpu up
+name: inference-gateway
+
+x-gateway: &gateway
+  build:
+    context: ..
+    args: { VERSION: compose }
+  image: inference-gateway:local
+  environment:
+    GATEWAY_ADMIN_TOKEN: admin-local-dev
+    REDIS_ADDR: redis:6379
+  depends_on: [redis, jaeger]
+  restart: unless-stopped
+
+x-worker: &worker
+  image: inference-gateway:local
+  entrypoint: ["/usr/local/bin/mockworker"]
+  depends_on: [gateway-1]
+  restart: unless-stopped
+
+services:
+  lb:
+    image: nginx:1.27-alpine
+    ports: ["8080:8080"]
+    volumes: ["./nginx.conf:/etc/nginx/nginx.conf:ro"]
+    depends_on: [gateway-1, gateway-2]
+
+  gateway-1:
+    <<: *gateway
+  gateway-2:
+    <<: *gateway
+    environment:
+      GATEWAY_ADMIN_TOKEN: admin-local-dev
+      REDIS_ADDR: redis:6379
+      OTEL_SERVICE_NAME: inference-gateway
+
+  # Simulated vLLM workers (Llama 3, Mistral) and an Ollama worker (Phi, Gemma).
+  vllm-1:
+    <<: *worker
+    command: ["-addr", ":8000", "-id", "vllm-1", "-models", "llama3-8b,mistral-7b", "-kv-blocks", "1500"]
+  vllm-2:
+    <<: *worker
+    command: ["-addr", ":8000", "-id", "vllm-2", "-models", "llama3-8b", "-kv-blocks", "1500"]
+  ollama-1:
+    <<: *worker
+    command: ["-addr", ":11434", "-id", "ollama-1", "-kind", "ollama", "-models", "phi3,gemma2"]
+  # Joins at runtime: pulls its model assignment, self-registers, heartbeats.
+  vllm-3:
+    <<: *worker
+    environment:
+      GATEWAY_ADMIN_TOKEN: admin-local-dev
+    command: ["-addr", ":8000", "-id", "vllm-3", "-models", "unused", "-kv-blocks", "1500",
+              "-gateway", "http://gateway-1:8080,http://gateway-2:8080", "-advertise-url", "http://vllm-3:8000"]
+
+  loadgen:
+    image: inference-gateway:local
+    entrypoint: ["/usr/local/bin/loadgen"]
+    command: ["-url", "http://lb:8080", "-key", "sk-local-dev", "-admin-token", "admin-local-dev",
+              "-conversations", "96", "-turns", "4", "-concurrency", "32", "-system-prompts", "24"]
+    depends_on: [lb]
+    profiles: ["load"]
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no", "--maxmemory", "512mb", "--maxmemory-policy", "allkeys-lru"]
+    ports: ["6379:6379"]
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    volumes: ["./prometheus.yml:/etc/prometheus/prometheus.yml:ro"]
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.2.2
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/gateway.json
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+    depends_on: [prometheus]
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.62.0
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports: ["16686:16686", "4318:4318"]
+
+  # --- Real GPU workers (optional) -------------------------------------
+  vllm-gpu:
+    profiles: ["gpu"]
+    image: vllm/vllm-openai:v0.6.3
+    command: ["--model", "meta-llama/Meta-Llama-3-8B-Instruct", "--served-model-name", "llama3-8b",
+              "--enable-prefix-caching", "--enable-chunked-prefill", "--max-num-seqs", "128",
+              "--gpu-memory-utilization", "0.90"]
+    environment:
+      HUGGING_FACE_HUB_TOKEN: ${HUGGING_FACE_HUB_TOKEN:-}
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+  ollama-gpu:
+    profiles: ["gpu"]
+    image: ollama/ollama:0.3.14
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]

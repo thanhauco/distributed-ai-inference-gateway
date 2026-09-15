@@ -1,0 +1,101 @@
+# Stateless gateway: scale horizontally behind a Service / Ingress.
+# kubectl create configmap gateway-config --from-file=gateway.yaml=configs/gateway.k8s.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gateway-secrets
+type: Opaque
+stringData:
+  GATEWAY_ADMIN_TOKEN: change-me
+  GATEWAY_API_KEY: change-me-too
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inference-gateway
+  labels: { app: inference-gateway }
+spec:
+  replicas: 3
+  selector:
+    matchLabels: { app: inference-gateway }
+  strategy:
+    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+  template:
+    metadata:
+      labels: { app: inference-gateway }
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      # Long SSE streams: give in-flight responses time to finish on rollout.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: gateway
+          image: ghcr.io/thanhauco/distributed-ai-inference-gateway:latest
+          args: ["-config", "/etc/gateway/gateway.yaml"]
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom: [{ secretRef: { name: gateway-secrets } }]
+          env:
+            - { name: REDIS_ADDR, value: "redis:6379" }
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "otel-collector:4318" }
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 10
+          lifecycle:
+            # Keep serving while the endpoint is removed from load balancers.
+            preStop:
+              sleep: { seconds: 5 }
+          resources:
+            requests: { cpu: "500m", memory: 256Mi }
+            limits: { memory: 1Gi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/gateway }
+          securityContext:
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+      volumes:
+        - name: config
+          configMap: { name: gateway-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-gateway
+spec:
+  selector: { app: inference-gateway }
+  ports: [{ name: http, port: 80, targetPort: http }]
+---
+# Headless service so workers can register with every replica.
+apiVersion: v1
+kind: Service
+metadata:
+  name: inference-gateway-replicas
+spec:
+  clusterIP: None
+  selector: { app: inference-gateway }
+  ports: [{ name: http, port: 8080 }]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: inference-gateway
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: inference-gateway }
+  minReplicas: 3
+  maxReplicas: 20
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } }
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: inference-gateway
+spec:
+  minAvailable: 2
+  selector:
+    matchLabels: { app: inference-gateway }

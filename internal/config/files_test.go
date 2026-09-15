@@ -10,7 +10,7 @@ import (
 func TestShippedConfigsLoad(t *testing.T) {
 	_, file, _, _ := runtime.Caller(0)
 	root := filepath.Join(filepath.Dir(file), "..", "..", "configs")
-	for _, name := range []string{"gateway.yaml"} {
+	for _, name := range []string{"gateway.yaml", "gateway.docker.yaml", "gateway.k8s.yaml"} {
 		cfg, err := Load(filepath.Join(root, name))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)

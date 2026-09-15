@@ -1,0 +1,83 @@
+# Stateful GPU workers, one StatefulSet per model pool so each scales
+# independently. Pods get stable DNS names (vllm-llama3-0.vllm-llama3, ...)
+# that the gateway config lists as static workers.
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vllm-llama3
+spec:
+  serviceName: vllm-llama3
+  replicas: 2
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: { app: vllm-llama3 }
+  template:
+    metadata:
+      labels: { app: vllm-llama3 }
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.6.3
+          args:
+            - --model=meta-llama/Meta-Llama-3-8B-Instruct
+            - --served-model-name=llama3-8b
+            - --enable-prefix-caching      # KV reuse across requests: what affinity routing exploits
+            - --enable-chunked-prefill     # long prompts don't stall decoding of others
+            - --max-num-seqs=128           # continuous batching width
+            - --gpu-memory-utilization=0.90
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom: { secretKeyRef: { name: hf-token, key: token } }
+          ports: [{ name: http, containerPort: 8000 }]
+          readinessProbe:
+            httpGet: { path: /health, port: http }
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          resources:
+            limits: { nvidia.com/gpu: 1 }
+          volumeMounts:
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 8Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-llama3
+spec:
+  clusterIP: None
+  selector: { app: vllm-llama3 }
+  ports: [{ name: http, port: 8000 }]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: ollama-small
+spec:
+  serviceName: ollama-small
+  replicas: 1
+  selector:
+    matchLabels: { app: ollama-small }
+  template:
+    metadata:
+      labels: { app: ollama-small }
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:0.3.14
+          env:
+            - { name: OLLAMA_KEEP_ALIVE, value: "24h" }
+            - { name: OLLAMA_NUM_PARALLEL, value: "8" }
+          ports: [{ name: http, containerPort: 11434 }]
+          resources:
+            limits: { nvidia.com/gpu: 1 }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-small
+spec:
+  clusterIP: None
+  selector: { app: ollama-small }
+  ports: [{ name: http, port: 11434 }]
