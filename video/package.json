@@ -1,0 +1,16 @@
+{
+  "name": "inference-gateway-video",
+  "private": true,
+  "type": "module",
+  "description": "Motion-graphics walkthrough of the gateway architecture, rendered frame by frame with Playwright + ffmpeg.",
+  "scripts": {
+    "render": "node render.mjs",
+    "preview": "node render.mjs --preview"
+  },
+  "dependencies": {
+    "roughjs": "4.6.6"
+  },
+  "devDependencies": {
+    "playwright": "1.56.1"
+  }
+}

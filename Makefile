@@ -5,7 +5,7 @@ LDFLAGS   := -s -w -X main.version=$(VERSION)
 API_KEY   ?= sk-local-dev
 ADMIN     ?= admin-local-dev
 
-.PHONY: all build test race cover lint fmt run run-workers stop loadgen bench-affinity docker compose-up compose-down clean
+.PHONY: all build test race cover lint fmt run run-workers stop loadgen bench-affinity docker compose-up compose-down video clean
 
 all: lint test build
 
@@ -55,6 +55,9 @@ compose-up: ## Full stack: nginx, 2 gateways, workers, Redis, Prometheus, Grafan
 
 compose-down:
 	docker compose -f deploy/docker-compose.yml down
+
+video: ## Re-render the architecture motion-graphics video
+	cd video && npm install --no-audit --no-fund && node render.mjs
 
 clean:
 	rm -rf $(BIN) coverage.out
