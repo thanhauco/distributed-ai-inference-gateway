@@ -169,7 +169,7 @@ and dynamic worker registration.
 
 ## License
 
-MIT. The video uses the Virgil and Cascadia fonts, both under the SIL Open
-Font License (see [`video/README.md`](video/README.md)).
+MIT. The diagram and video use the Inter and Cascadia Code fonts, both under
+the SIL Open Font License (see [`video/README.md`](video/README.md)).
 
 Built by Thanh & Claude, 2026.

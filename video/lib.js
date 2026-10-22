@@ -28,7 +28,7 @@ const C = {
   req: '#f76707',
 };
 
-const FONT = 'Virgil, "DejaVu Sans", sans-serif';
+const FONT = 'Inter, "DejaVu Sans", sans-serif';
 const MONO = 'Cascadia, "DejaVu Sans Mono", monospace';
 
 let ctx;
@@ -176,9 +176,23 @@ function highlight(x, y, w, p, color = 'rgba(255, 212, 59, 0.55)') {
 }
 
 // ---- text ------------------------------------------------------------
+// Weight follows size unless given: headings bold, box titles semibold,
+// labels medium. Mono text stays regular.
+function weightFor(size, o = {}) {
+  if (o.weight) return o.weight;
+  if (o.mono) return 400;
+  if (size >= 40) return 700;
+  if (size >= 24) return 600;
+  return 500;
+}
+
+function fontSpec(size, o = {}) {
+  return `${weightFor(size, o)} ${size}px ${o.mono ? MONO : FONT}`;
+}
+
 function text(str, x, y, o = {}) {
   ctx.save();
-  ctx.font = `${o.size || 28}px ${o.mono ? MONO : FONT}`;
+  ctx.font = fontSpec(o.size || 28, o);
   ctx.fillStyle = o.color || C.ink;
   ctx.textAlign = o.align || 'left';
   ctx.textBaseline = o.baseline || 'middle';
@@ -188,9 +202,9 @@ function text(str, x, y, o = {}) {
   ctx.restore();
 }
 
-function textWidth(str, size, mono) {
+function textWidth(str, size, mono, weight) {
   ctx.save();
-  ctx.font = `${size}px ${mono ? MONO : FONT}`;
+  ctx.font = fontSpec(size, { mono, weight });
   const w = ctx.measureText(str).width;
   ctx.restore();
   return w;

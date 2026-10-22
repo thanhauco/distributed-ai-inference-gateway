@@ -2,9 +2,11 @@
 
 `docs/media/architecture-walkthrough.mp4` (1920×1080, 30 fps, ~2 min) is
 rendered from code: every frame is a pure function of time drawn on a
-`<canvas>` with [rough.js](https://roughjs.com) in the hand-drawn style of the
-original system-design sketch, captured by headless Chromium (Playwright) and
-encoded with ffmpeg.
+`<canvas>`. Shapes use [rough.js](https://roughjs.com) for the sketched look of
+the original system diagram; text is set in Inter for legibility. Frames are
+captured by headless Chromium (Playwright) and encoded with ffmpeg. The README
+diagram (`docs/media/architecture.png`) is a still from the same renderer
+(`node render.mjs --stills 20`).
 
 | Time | Scene |
 |---|---|
@@ -32,6 +34,7 @@ Set `CHROMIUM_PATH` to use a system Chromium instead of Playwright's.
 
 ## Fonts
 
-`assets/Virgil.woff2` (Virgil, by Ellinor Rapp for Excalidraw) and
-`assets/Cascadia.woff2` (Cascadia Code, by Microsoft) are redistributed under
-the SIL Open Font License 1.1; see [`assets/OFL.txt`](assets/OFL.txt).
+`assets/Inter-*.woff2` (Inter, by Rasmus Andersson, converted from the OTF
+release) and `assets/Cascadia.woff2` (Cascadia Code, by Microsoft) are
+redistributed under the SIL Open Font License 1.1; see
+[`assets/OFL.txt`](assets/OFL.txt).

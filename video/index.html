@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <title>Inference Gateway Walkthrough</title>
 <style>
-  @font-face { font-family: Virgil; src: url(assets/Virgil.woff2) format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 400; src: url(assets/Inter-Regular.woff2) format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 500; src: url(assets/Inter-Medium.woff2) format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 600; src: url(assets/Inter-SemiBold.woff2) format('woff2'); }
+  @font-face { font-family: Inter; font-weight: 700; src: url(assets/Inter-Bold.woff2) format('woff2'); }
   @font-face { font-family: Cascadia; src: url(assets/Cascadia.woff2) format('woff2'); }
   html, body { margin: 0; background: #fffdf8; overflow: hidden; }
   canvas { display: block; }
@@ -20,7 +23,10 @@
   window.DURATION = DURATION;
   window.renderFrame = renderFrame;
   window.ready = Promise.all([
-    document.fonts.load('40px Virgil'),
+    document.fonts.load('400 40px Inter'),
+    document.fonts.load('500 40px Inter'),
+    document.fonts.load('600 40px Inter'),
+    document.fonts.load('700 40px Inter'),
     document.fonts.load('40px Cascadia'),
   ]).then(() => document.fonts.ready).then(() => true);
   // Interactive preview: open index.html?play in a browser.

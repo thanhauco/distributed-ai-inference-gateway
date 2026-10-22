@@ -1,4 +1,4 @@
-Virgil: designed by Ellinor Rapp for Excalidraw (https://github.com/excalidraw/virgil)
+Inter: Copyright (c) 2016 The Inter Project Authors (https://github.com/rsms/inter)
 Cascadia Code: Copyright (c) 2019 - Present, Microsoft Corporation (https://github.com/microsoft/cascadia-code)
 
 Both fonts are licensed under the SIL Open Font License, Version 1.1.
